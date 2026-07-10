@@ -1,0 +1,422 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Speech to Text — in your browser</title>
+
+<!-- onnxruntime-web: runs the ONNX model entirely client-side (wasm) -->
+<script src="https://cdn.jsdelivr.net/npm/onnxruntime-web@1.20.1/dist/ort.min.js"></script>
+
+<style>
+  :root {
+    --ink: #14261f;          /* deep spruce */
+    --paper: #f2efe6;        /* warm oat */
+    --line: #c9c2ad;
+    --accent: #4a7a5c;       /* muted moss */
+    --accent-ink: #1e3a2a;
+    --wave: #7a9d84;
+    --mono: ui-monospace, "SF Mono", "Cascadia Code", Menlo, monospace;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { height: 100%; }
+  body {
+    background: var(--paper);
+    color: var(--ink);
+    font-family: "Iowan Old Style", "Palatino Linotype", Palatino, Georgia, serif;
+    line-height: 1.5;
+    display: flex;
+    justify-content: center;
+    padding: 6vh 20px;
+  }
+  .wrap { width: 100%; max-width: 640px; }
+
+  .eyebrow {
+    font-family: var(--mono);
+    font-size: 0.72rem;
+    letter-spacing: 0.22em;
+    text-transform: uppercase;
+    color: var(--accent);
+    margin-bottom: 14px;
+  }
+  h1 {
+    font-size: clamp(2rem, 6vw, 3.1rem);
+    font-weight: 600;
+    line-height: 1.02;
+    letter-spacing: -0.02em;
+    margin-bottom: 10px;
+  }
+  h1 em { font-style: italic; color: var(--accent-ink); }
+  .sub {
+    font-size: 1rem;
+    color: #4c5852;
+    max-width: 46ch;
+    margin-bottom: 36px;
+  }
+
+  .stage {
+    border: 1px solid var(--line);
+    background: #fbfaf5;
+  }
+  .drop {
+    padding: 40px 28px;
+    text-align: center;
+    cursor: pointer;
+    transition: background 0.15s;
+    border-bottom: 1px solid var(--line);
+  }
+  .drop:hover, .drop.over { background: #f2efe4; }
+  .drop input { display: none; }
+  .drop .big {
+    font-size: 1.1rem;
+    margin-bottom: 6px;
+  }
+  .drop .hint {
+    font-family: var(--mono);
+    font-size: 0.72rem;
+    letter-spacing: 0.04em;
+    color: #7c857f;
+  }
+
+  /* waveform + status row */
+  .meta {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    padding: 16px 22px;
+    min-height: 60px;
+    border-bottom: 1px solid var(--line);
+  }
+  canvas#wave { width: 100%; height: 34px; display: block; }
+  .filename {
+    font-family: var(--mono);
+    font-size: 0.75rem;
+    color: #5a635d;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    max-width: 40%;
+  }
+
+  .out {
+    padding: 26px 24px;
+    min-height: 96px;
+  }
+  .out .label {
+    font-family: var(--mono);
+    font-size: 0.68rem;
+    letter-spacing: 0.18em;
+    text-transform: uppercase;
+    color: #8a9188;
+    margin-bottom: 10px;
+  }
+  .out .text {
+    font-size: 1.35rem;
+    line-height: 1.35;
+    min-height: 1.4em;
+    word-wrap: break-word;
+  }
+  .out .text.placeholder { color: #a9afa5; font-style: italic; }
+
+  .steps {
+    display: flex;
+    gap: 0;
+    margin-top: 2px;
+    font-family: var(--mono);
+    font-size: 0.66rem;
+    letter-spacing: 0.05em;
+  }
+  .steps .s {
+    flex: 1;
+    padding: 9px 6px;
+    text-align: center;
+    color: #9aa096;
+    border: 1px solid var(--line);
+    border-top: none;
+    border-right: none;
+    background: #f7f5ee;
+  }
+  .steps .s:last-child { border-right: 1px solid var(--line); }
+  .steps .s.active { color: var(--accent-ink); background: #e7ecdf; }
+  .steps .s.done   { color: var(--accent); }
+
+  footer {
+    margin-top: 22px;
+    font-family: var(--mono);
+    font-size: 0.68rem;
+    color: #9098 8c;
+    color: #909890;
+    line-height: 1.7;
+  }
+  footer b { color: #5a635d; font-weight: 600; }
+  .err { color: #a6432f; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="eyebrow">On-device · no server</div>
+  <h1>Speech to text,<br><em>entirely in the browser.</em></h1>
+  <p class="sub">Upload a short English clip. The audio never leaves this page —
+     the mel front-end runs as WebAssembly and the acoustic model runs in
+     onnxruntime-web, right here on your machine.</p>
+
+  <div class="stage">
+    <label class="drop" id="drop">
+      <div class="big">Drop a <b>.wav</b> here, or click to choose</div>
+      <div class="hint">mono or stereo · any sample rate · resampled to 16 kHz</div>
+      <input type="file" id="file" accept="audio/*">
+    </label>
+
+    <div class="meta">
+      <span class="filename" id="fname">no file yet</span>
+      <canvas id="wave"></canvas>
+    </div>
+
+    <div class="out">
+      <div class="label">Transcription</div>
+      <div class="text placeholder" id="text">Waiting for audio…</div>
+    </div>
+
+    <div class="steps" id="steps">
+      <div class="s" data-k="decode">decode</div>
+      <div class="s" data-k="mel">mel</div>
+      <div class="s" data-k="model">model</div>
+      <div class="s" data-k="ctc">decode text</div>
+    </div>
+  </div>
+
+  <footer>
+    <b>Pipeline:</b> wav → Web Audio decode+resample → mel (wasm) →
+    quartznet_full.onnx (onnxruntime-web) → greedy CTC.<br>
+    <span id="load">Loading model &amp; wasm…</span>
+  </footer>
+</div>
+
+<script type="module">
+import createMelModule from './mel.js';   // Emscripten output (mel.js + mel.wasm)
+
+const SR = 16000;
+const ONNX_URL = './quartznet_full.onnx';
+const LABELS_URL = './quartznet_labels.txt';
+const CONSTS_URL = './nemo_mel_constants.bin';
+
+const el = (id) => document.getElementById(id);
+const stepEls = {};
+document.querySelectorAll('.steps .s').forEach(s => stepEls[s.dataset.k] = s);
+const setStep = (k, state) => {
+  const s = stepEls[k]; if (!s) return;
+  s.classList.remove('active','done');
+  if (state) s.classList.add(state);
+};
+const resetSteps = () => Object.keys(stepEls).forEach(k => setStep(k, null));
+
+let mel = null;         // wasm module instance
+let wasmMem = null;     // the WebAssembly.Memory backing mel's heap
+let session = null;     // ORT session
+let labels = [];        // vocab
+let constBytes = null;  // Uint8Array of nemo_mel_constants.bin
+
+// ---- one-time load of wasm, model, labels, constants ----
+(async function init() {
+  try {
+    const [modInst, sess, labTxt, constBuf] = await Promise.all([
+      // Emscripten 6.0.2 does NOT expose wasmMemory/HEAPF32 on the module object.
+      // Use the instantiateWasm hook to grab the WebAssembly.Memory ourselves.
+      createMelModule({
+        instantiateWasm(imports, done) {
+          (async () => {
+            let instance;
+            try {
+              const res = await WebAssembly.instantiateStreaming(
+                fetch('./mel.wasm', { credentials: 'same-origin' }), imports);
+              instance = res.instance;
+            } catch {
+              // fallback: servers that send the wrong MIME type for .wasm
+              const bytes = await fetch('./mel.wasm').then(r => r.arrayBuffer());
+              instance = (await WebAssembly.instantiate(bytes, imports)).instance;
+            }
+            wasmMem = instance.exports.memory;   // <-- the heap we need
+            done(instance);
+          })();
+          return {};   // async path: the real result is delivered via done()
+        }
+      }),
+      ort.InferenceSession.create(ONNX_URL, { executionProviders: ['wasm'] }),
+      fetch(LABELS_URL).then(r => r.text()),
+      fetch(CONSTS_URL).then(r => r.arrayBuffer()),
+    ]);
+    mel = modInst;
+    session = sess;
+    labels = labTxt.replace(/\r/g,'').split('\n').filter(l => l.length > 0 || l === ' ');
+    // keep exactly the lines (space char is a valid label) — split then trim trailing empty
+    labels = labTxt.split('\n').map(l => l.replace(/\r$/,''));
+    if (labels.length && labels[labels.length-1] === '') labels.pop();
+    constBytes = new Uint8Array(constBuf);
+    el('load').innerHTML = `Ready · ${labels.length} labels · model loaded.`;
+  } catch (e) {
+    el('load').innerHTML = `<span class="err">Load failed: ${e.message}</span>`;
+    console.error(e);
+  }
+})();
+
+// ---- file handling ----
+const drop = el('drop'), fileInput = el('file');
+drop.addEventListener('dragover', e => { e.preventDefault(); drop.classList.add('over'); });
+drop.addEventListener('dragleave', () => drop.classList.remove('over'));
+drop.addEventListener('drop', e => {
+  e.preventDefault(); drop.classList.remove('over');
+  if (e.dataTransfer.files[0]) handleFile(e.dataTransfer.files[0]);
+});
+fileInput.addEventListener('change', e => { if (e.target.files[0]) handleFile(e.target.files[0]); });
+
+async function handleFile(file) {
+  if (!mel || !session) { el('text').textContent = 'Still loading, try again in a moment.'; return; }
+  el('fname').textContent = file.name;
+  el('text').classList.remove('placeholder');
+  el('text').textContent = '…';
+  resetSteps();
+
+  try {
+    // 1. decode + resample to 16 kHz mono via Web Audio
+    setStep('decode','active');
+    const buf = await file.arrayBuffer();
+    const samples = await decodeToMono16k(buf);
+    drawWave(samples);
+    setStep('decode','done');
+
+    // 2. mel via wasm
+    setStep('mel','active');
+    const { data: melData, nMels, total, seqLen } = runMel(samples);
+    setStep('mel','done');
+
+    // 3. model via onnxruntime-web
+    setStep('model','active');
+    const melTensor = new ort.Tensor('float32', melData, [1, nMels, total]);
+    const lenTensor = new ort.Tensor('int64', BigInt64Array.from([BigInt(seqLen)]), [1]);
+    // route inputs by the model's declared names
+    const feeds = {};
+    for (const name of session.inputNames) {
+      feeds[name] = (name.toLowerCase().includes('len')) ? lenTensor : melTensor;
+    }
+    const results = await session.run(feeds);
+    const logits = results[session.outputNames[0]];
+    setStep('model','done');
+
+    // 4. greedy CTC decode
+    setStep('ctc','active');
+    const text = ctcDecode(logits);
+    setStep('ctc','done');
+
+    el('text').textContent = text.length ? text : '(empty)';
+  } catch (e) {
+    el('text').innerHTML = `<span class="err">${e.message}</span>`;
+    console.error(e);
+  }
+}
+
+// Web Audio: decode any browser-supported audio, downmix, resample to 16k.
+async function decodeToMono16k(arrayBuffer) {
+  const tmpCtx = new (window.AudioContext || window.webkitAudioContext)();
+  const decoded = await tmpCtx.decodeAudioData(arrayBuffer.slice(0));
+  tmpCtx.close();
+  // downmix to mono
+  const ch = decoded.numberOfChannels;
+  const n = decoded.length;
+  const mono = new Float32Array(n);
+  for (let c = 0; c < ch; c++) {
+    const d = decoded.getChannelData(c);
+    for (let i = 0; i < n; i++) mono[i] += d[i] / ch;
+  }
+  if (decoded.sampleRate === SR) return mono;
+  // resample via OfflineAudioContext
+  const outLen = Math.ceil(n * SR / decoded.sampleRate);
+  const off = new OfflineAudioContext(1, outLen, SR);
+  const src = off.createBufferSource();
+  const b = off.createBuffer(1, n, decoded.sampleRate);
+  b.copyToChannel(mono, 0);
+  src.buffer = b; src.connect(off.destination); src.start();
+  const rendered = await off.startRendering();
+  return rendered.getChannelData(0);
+}
+
+// call the wasm mel_extract, copy result out of the heap
+//
+// Every allocation / call below can trigger ALLOW_MEMORY_GROWTH, which on a
+// classic (non-resizable) buffer swaps wasmMem.buffer and DETACHES any old
+// typed-array view. So we never cache a heap view: we build a fresh view from
+// wasmMem.buffer immediately before each read/write. (On resizable buffers the
+// buffer grows in place and this is simply a cheap no-op safety.)
+function runMel(samples) {
+  const nS = samples.length;
+  const buf = () => wasmMem.buffer;   // always the current backing store
+
+  // input samples: float32[nS]
+  const sPtr = mel._malloc(nS * 4);
+  new Float32Array(buf()).set(samples, sPtr >> 2);
+
+  // constants blob: uint8[len]
+  const cPtr = mel._malloc(constBytes.length);
+  new Uint8Array(buf()).set(constBytes, cPtr);
+
+  // three int32 out-params
+  const nMelsPtr = mel._malloc(4), totalPtr = mel._malloc(4), seqPtr = mel._malloc(4);
+
+  const outPtr = mel._mel_extract(sPtr, nS, cPtr, constBytes.length, nMelsPtr, totalPtr, seqPtr);
+
+  // read the out-params (fresh view — memory may have grown during the call)
+  const i32 = new Int32Array(buf());
+  const nMels = i32[nMelsPtr >> 2];
+  const total = i32[totalPtr >> 2];
+  const seqLen = i32[seqPtr >> 2];
+
+  // copy the returned float32[nMels*total] out of the heap before we free it
+  const f32 = new Float32Array(buf());
+  const data = new Float32Array(nMels * total);
+  data.set(f32.subarray(outPtr >> 2, (outPtr >> 2) + nMels * total));
+
+  mel._free(sPtr); mel._free(cPtr); mel._free(nMelsPtr);
+  mel._free(totalPtr); mel._free(seqPtr); mel._free(outPtr);
+
+  return { data, nMels, total, seqLen };
+}
+
+// greedy CTC: argmax per frame, collapse repeats, drop blank (== labels.length)
+function ctcDecode(logitsTensor) {
+  const [ , T, V] = logitsTensor.dims;   // [1, T, V]
+  const d = logitsTensor.data;
+  const blank = labels.length;           // V-1
+  let out = '', prev = -1;
+  for (let t = 0; t < T; t++) {
+    let best = 0, bestv = d[t*V];
+    for (let v = 1; v < V; v++) { const val = d[t*V+v]; if (val > bestv) { bestv = val; best = v; } }
+    if (best !== prev && best !== blank) out += labels[best];
+    prev = best;
+  }
+  return out;
+}
+
+// simple waveform preview
+function drawWave(samples) {
+  const cvs = el('wave'); const dpr = window.devicePixelRatio || 1;
+  const w = cvs.clientWidth, h = cvs.clientHeight;
+  cvs.width = w * dpr; cvs.height = h * dpr;
+  const ctx = cvs.getContext('2d'); ctx.scale(dpr, dpr);
+  ctx.clearRect(0,0,w,h);
+  ctx.strokeStyle = getComputedStyle(document.documentElement).getPropertyValue('--wave').trim();
+  ctx.lineWidth = 1;
+  const step = Math.max(1, Math.floor(samples.length / w));
+  ctx.beginPath();
+  for (let x = 0; x < w; x++) {
+    let min = 1, max = -1;
+    for (let i = 0; i < step; i++) {
+      const s = samples[x*step+i] || 0;
+      if (s < min) min = s; if (s > max) max = s;
+    }
+    ctx.moveTo(x, (1-(min+1)/2)*h);
+    ctx.lineTo(x, (1-(max+1)/2)*h);
+  }
+  ctx.stroke();
+}
+</script>
+</body>
+</html>

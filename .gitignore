@@ -2,3 +2,5 @@ __pycache__/
 nemo_mel
 example.wav
 indic_env/
+onnx_build/
+emsdk/

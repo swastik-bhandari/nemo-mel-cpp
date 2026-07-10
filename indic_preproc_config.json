@@ -1,0 +1,31 @@
+{
+  "sample_rate": 16000,
+  "n_mels": 80,
+  "n_fft": 512,
+  "win_length": 400,
+  "win_length_ms": 25.0,
+  "hop_length": 160,
+  "hop_length_ms": 10.0,
+  "window": "hann_check",
+  "center_pad": 256,
+  "pad_mode": "reflect",
+  "mag_power": 2.0,
+  "log": "ln(mel + 2^-24)",
+  "log_zero_guard": 5.960464477539063e-08,
+  "normalize": "per_feature (mean/std over time)",
+  "norm_eps": 1e-05,
+  "preemph": null,
+  "dither_eval": 0.0,
+  "mel_filterbank_shape": [
+    80,
+    257
+  ],
+  "ctc_vocab_full": 5633,
+  "vocab_ne_size": 257,
+  "BLANK_ID": 256,
+  "subword": "sentencepiece(▁)",
+  "encoder_input": "audio_signal[B,80,T]",
+  "encoder_output": "outputs[B,1024,T']",
+  "ctc_output": "logprobs[B,T',5633]",
+  "lang_mask_ne_true": 257
+}

@@ -1,0 +1,285 @@
+<!DOCTYPE html>
+<html lang="ne">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Nepali Speech → Text</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+Devanagari:wght@500;600&family=Fraunces:ital,opsz,wght@0,9..144,500;0,9..144,600;1,9..144,500&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --ink:#16261f; --paper:#eef1ea; --card:#fbfcf9; --line:#d7dccf;
+    --accent:#3f7d5c; --accent-ink:#1c3a2a; --accent-soft:#e3ede4;
+    --wave:#7fa98b; --muted:#6b746c; --err:#b0402c;
+    --shadow:0 1px 2px rgba(20,40,30,.04),0 12px 34px -14px rgba(20,40,30,.22);
+    --mono:"JetBrains Mono",ui-monospace,Menlo,monospace;
+    --serif:"Fraunces",Georgia,serif;
+    --deva:"Noto Sans Devanagari","Fraunces",serif;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  html,body{height:100%}
+  body{
+    background:
+      radial-gradient(1100px 500px at 12% -8%, #e7efe6 0%, transparent 60%),
+      radial-gradient(900px 480px at 100% 0%, #eaf0ea 0%, transparent 55%),
+      var(--paper);
+    color:var(--ink);font-family:var(--serif);line-height:1.5;
+    display:flex;justify-content:center;padding:6vh 20px;
+    -webkit-font-smoothing:antialiased;
+  }
+  .wrap{width:100%;max-width:660px}
+
+  .top{display:flex;align-items:center;gap:10px;margin-bottom:20px}
+  .dot{width:9px;height:9px;border-radius:50%;background:var(--accent);
+    box-shadow:0 0 0 4px var(--accent-soft);animation:pulse 2.4s ease-in-out infinite}
+  @keyframes pulse{0%,100%{opacity:.55}50%{opacity:1}}
+  .eyebrow{font-family:var(--mono);font-size:.7rem;letter-spacing:.2em;
+    text-transform:uppercase;color:var(--accent)}
+
+  h1{font-family:var(--serif);font-size:clamp(2.1rem,6vw,3.2rem);font-weight:600;
+    line-height:1.02;letter-spacing:-.02em;margin-bottom:12px}
+  h1 em{font-style:italic;color:var(--accent-ink)}
+  .sub{font-size:1.02rem;color:#48524b;max-width:48ch;margin-bottom:30px}
+
+  .langbar{display:flex;align-items:center;gap:12px;margin-bottom:14px}
+  .langbar label{font-family:var(--mono);font-size:.66rem;letter-spacing:.16em;
+    text-transform:uppercase;color:var(--muted)}
+  .selwrap{position:relative;flex:1;max-width:260px}
+  .selwrap select{appearance:none;-webkit-appearance:none;width:100%;
+    font-family:var(--serif);font-size:1rem;color:var(--ink);
+    background:var(--card);border:1px solid var(--line);border-radius:10px;
+    padding:9px 38px 9px 14px;cursor:pointer;box-shadow:var(--shadow);transition:border-color .15s}
+  .selwrap select:hover{border-color:var(--accent)}
+  .selwrap select:focus{outline:none;border-color:var(--accent);box-shadow:0 0 0 3px var(--accent-soft)}
+  .chev{position:absolute;right:12px;top:50%;transform:translateY(-50%);
+    width:16px;height:16px;color:var(--accent);pointer-events:none}
+
+  .card{border:1px solid var(--line);background:var(--card);border-radius:16px;
+    box-shadow:var(--shadow);overflow:hidden}
+
+  .drop{position:relative;padding:38px 26px;text-align:center;cursor:pointer;
+    transition:background .18s,border-color .18s;border-bottom:1px solid var(--line)}
+  .drop:hover{background:#f4f7f1}
+  .drop.over{background:var(--accent-soft)}
+  .drop.over .ring{border-color:var(--accent);transform:scale(1.04)}
+  .drop input{display:none}
+  .ring{width:52px;height:52px;margin:0 auto 14px;border-radius:50%;
+    border:2px dashed var(--line);display:flex;align-items:center;justify-content:center;
+    transition:transform .18s,border-color .18s;color:var(--accent)}
+  .ring svg{width:24px;height:24px}
+  .drop .big{font-size:1.08rem;margin-bottom:4px}
+  .drop .big b{color:var(--accent-ink)}
+  .drop .hint{font-family:var(--mono);font-size:.7rem;letter-spacing:.03em;color:#8a917f}
+
+  .meta{display:flex;align-items:center;gap:14px;padding:14px 20px;
+    border-bottom:1px solid var(--line);min-height:58px;background:#f7f9f4}
+  .fmeta{min-width:0;flex:0 0 34%}
+  .filename{font-family:var(--mono);font-size:.74rem;color:#41494200;color:#414942;
+    white-space:nowrap;overflow:hidden;text-overflow:ellipsis;display:block}
+  .fsize{font-family:var(--mono);font-size:.66rem;color:var(--muted);margin-top:2px}
+  canvas#wave{flex:1;width:100%;height:38px;display:block}
+
+  audio{display:none;width:100%;padding:10px 20px;background:#f7f9f4;
+    border-bottom:1px solid var(--line)}
+  audio.show{display:block}
+
+  .out{padding:24px}
+  .out-head{display:flex;align-items:center;justify-content:space-between;margin-bottom:12px}
+  .label{font-family:var(--mono);font-size:.66rem;letter-spacing:.16em;
+    text-transform:uppercase;color:#8a9188}
+  .copy{font-family:var(--mono);font-size:.66rem;letter-spacing:.04em;color:var(--accent);
+    background:none;border:1px solid var(--line);border-radius:999px;padding:4px 12px;
+    cursor:pointer;transition:.15s;display:none;align-items:center;gap:5px}
+  .copy:hover{background:var(--accent-soft);border-color:var(--accent)}
+  .copy.show{display:inline-flex}
+  .text{font-family:var(--deva);font-size:1.9rem;line-height:1.5;min-height:1.5em;
+    word-wrap:break-word;letter-spacing:.01em}
+  .text.placeholder{font-family:var(--serif);font-style:italic;color:#a4aa9d;font-size:1.1rem}
+  .text .err{color:var(--err);font-family:var(--serif);font-size:1rem}
+
+  .working{display:flex;align-items:center;gap:12px;color:var(--muted);
+    font-family:var(--mono);font-size:.82rem}
+  .spin{width:16px;height:16px;border:2px solid var(--line);border-top-color:var(--accent);
+    border-radius:50%;animation:sp .7s linear infinite}
+  @keyframes sp{to{transform:rotate(360deg)}}
+  .bar{height:3px;background:var(--line);border-radius:3px;overflow:hidden;margin-top:14px;display:none}
+  .bar.show{display:block}
+  .bar i{display:block;height:100%;width:40%;background:var(--accent);border-radius:3px;
+    animation:slide 1.1s ease-in-out infinite}
+  @keyframes slide{0%{transform:translateX(-100%)}100%{transform:translateX(320%)}}
+
+  footer{margin-top:20px;font-family:var(--mono);font-size:.66rem;color:#8b938b;line-height:1.8}
+  footer b{color:#5a635d;font-weight:500}
+  .badge{display:inline-block;padding:2px 8px;border:1px solid var(--line);border-radius:999px;
+    color:var(--muted);margin-right:6px}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="top"><span class="dot"></span><span class="eyebrow">22 Indic languages · running on this machine</span></div>
+  <h1>Indic speech,<br><em>to text.</em></h1>
+  <p class="sub">Pick a language and drop a <b>.wav</b> clip. It's processed by the
+     Indic-Conformer 600M model on this computer, and the transcription comes right back.</p>
+
+  <div class="langbar">
+    <label for="lang">Language</label>
+    <div class="selwrap">
+      <select id="lang"></select>
+      <svg class="chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+           stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg>
+    </div>
+  </div>
+
+  <div class="card">
+    <label class="drop" id="drop">
+      <div class="ring">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"
+             stroke-linecap="round" stroke-linejoin="round">
+          <path d="M12 15V3m0 0L8 7m4-4 4 4"/><path d="M4 15v4a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-4"/>
+        </svg>
+      </div>
+      <div class="big">Drop a <b>.wav</b> here, or click to choose</div>
+      <div class="hint">mono or stereo · any sample rate · 16-bit PCM</div>
+      <input type="file" id="file" accept="audio/wav,.wav">
+    </label>
+
+    <div class="meta" id="metaRow" style="display:none">
+      <div class="fmeta">
+        <span class="filename" id="fname">—</span>
+        <span class="fsize" id="fsize"></span>
+      </div>
+      <canvas id="wave"></canvas>
+    </div>
+
+    <audio id="player" controls></audio>
+
+    <div class="out">
+      <div class="out-head">
+        <div class="label" id="outLabel">Transcription</div>
+        <button class="copy" id="copy" title="Copy">
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+               stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>
+          </svg><span id="copyLbl">Copy</span>
+        </button>
+      </div>
+      <div class="text placeholder" id="text">Waiting for audio…</div>
+      <div class="bar" id="bar"><i></i></div>
+    </div>
+  </div>
+
+  <footer>
+    <span class="badge">on-machine server</span><span class="badge">CTC · fp32</span><br>
+    <b>Pipeline:</b> upload → mel → encoder.onnx → ctc_decoder.onnx → greedy CTC (SentencePiece).
+  </footer>
+</div>
+
+<script>
+const el = (id) => document.getElementById(id);
+const drop = el('drop'), fileInput = el('file'), player = el('player'), langSel = el('lang');
+let lastText = '';
+
+// populate language dropdown from the server
+(async function loadLangs(){
+  try {
+    const { languages, default: def } = await (await fetch('/languages')).json();
+    langSel.innerHTML = languages
+      .map(l => `<option value="${l.code}">${l.name}</option>`).join('');
+    langSel.value = def || 'ne';
+    updateLabel();
+  } catch (_) {
+    langSel.innerHTML = '<option value="ne">Nepali</option>';
+  }
+})();
+langSel.addEventListener('change', updateLabel);
+function updateLabel(){
+  const name = langSel.options[langSel.selectedIndex]?.text || '';
+  el('outLabel').textContent = 'Transcription · ' + name;
+}
+
+drop.addEventListener('dragover', e => { e.preventDefault(); drop.classList.add('over'); });
+drop.addEventListener('dragleave', () => drop.classList.remove('over'));
+drop.addEventListener('drop', e => {
+  e.preventDefault(); drop.classList.remove('over');
+  if (e.dataTransfer.files[0]) handleFile(e.dataTransfer.files[0]);
+});
+fileInput.addEventListener('change', e => { if (e.target.files[0]) handleFile(e.target.files[0]); });
+
+el('copy').addEventListener('click', async () => {
+  if (!lastText) return;
+  try {
+    await navigator.clipboard.writeText(lastText);
+    el('copyLbl').textContent = 'Copied';
+    setTimeout(() => el('copyLbl').textContent = 'Copy', 1400);
+  } catch (_) {}
+});
+
+function fmtBytes(b){ return b < 1024*1024 ? (b/1024).toFixed(0)+' KB' : (b/1024/1024).toFixed(1)+' MB'; }
+
+async function handleFile(file) {
+  el('metaRow').style.display = 'flex';
+  el('fname').textContent = file.name;
+  el('fsize').textContent = fmtBytes(file.size);
+  el('copy').classList.remove('show');
+  el('text').classList.remove('placeholder');
+  el('text').innerHTML = '<span class="working"><span class="spin"></span>Transcribing on this machine…</span>';
+  el('bar').classList.add('show');
+
+  const buf = await file.arrayBuffer();
+  // audio player + waveform (best-effort)
+  try {
+    player.src = URL.createObjectURL(new Blob([buf], { type: file.type || 'audio/wav' }));
+    player.classList.add('show');
+  } catch (_) {}
+  try { await drawWave(buf.slice(0)); } catch (_) {}
+
+  const t0 = performance.now();
+  try {
+    const fd = new FormData();
+    fd.append('audio', file, file.name);
+    fd.append('lang', langSel.value || 'ne');
+    const res = await fetch('/transcribe', { method: 'POST', body: fd });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || ('HTTP ' + res.status));
+    lastText = (data.text || '').trim();
+    const ms = Math.round(performance.now() - t0);
+    el('text').textContent = lastText.length ? lastText : '(empty)';
+    if (lastText.length) el('copy').classList.add('show');
+    el('fsize').textContent = fmtBytes(file.size)
+      + (data.duration_s ? ' · ' + data.duration_s + 's audio' : '')
+      + ' · ' + ms + 'ms';
+  } catch (e) {
+    el('text').innerHTML = `<span class="err">${e.message}</span>`;
+    lastText = '';
+    console.error(e);
+  } finally {
+    el('bar').classList.remove('show');
+  }
+}
+
+async function drawWave(arrayBuffer) {
+  const ctxA = new (window.AudioContext || window.webkitAudioContext)();
+  const decoded = await ctxA.decodeAudioData(arrayBuffer);
+  ctxA.close();
+  const samples = decoded.getChannelData(0);
+  const cvs = el('wave'); const dpr = window.devicePixelRatio || 1;
+  const w = cvs.clientWidth || 380, h = cvs.clientHeight || 38;
+  cvs.width = w * dpr; cvs.height = h * dpr;
+  const ctx = cvs.getContext('2d'); ctx.scale(dpr, dpr); ctx.clearRect(0, 0, w, h);
+  const accent = getComputedStyle(document.documentElement).getPropertyValue('--wave').trim();
+  const step = Math.max(1, Math.floor(samples.length / w));
+  const mid = h / 2;
+  ctx.fillStyle = accent;
+  for (let x = 0; x < w; x++) {
+    let peak = 0;
+    for (let i = 0; i < step; i++) { const s = Math.abs(samples[x*step+i] || 0); if (s > peak) peak = s; }
+    const bh = Math.max(1, peak * (h * 0.92));
+    ctx.globalAlpha = 0.35 + 0.65 * peak;
+    ctx.fillRect(x, mid - bh/2, 1, bh);
+  }
+  ctx.globalAlpha = 1;
+}
+</script>
+</body>
+</html>
