@@ -14,7 +14,7 @@
   "log_zero_guard": 5.960464477539063e-08,
   "normalize": "per_feature (mean/std over time)",
   "norm_eps": 1e-05,
-  "preemph": null,
+  "preemph": 0.97,
   "dither_eval": 0.0,
   "mel_filterbank_shape": [
     80,

@@ -2,18 +2,21 @@
 """
 Nepali ASR server — your computer runs the model, the browser is just an interface.
 
-Pipeline (exactly the CP1–CP3 verified path):
-  uploaded wav -> mono/16k (sinc) -> preprocessor.ts (mel) -> encoder.onnx
+Pipeline (torch-free — numpy front-end verified bit-exact vs preprocessor.ts):
+  uploaded wav -> mono/16k (numpy sinc) -> numpy mel -> encoder.onnx
               -> ctc_decoder.onnx -> language-mask[ne] -> greedy CTC -> SentencePiece text
+
+No torch/torchaudio at runtime: onnxruntime runs the model, indic_frontend does the DSP.
 
 Run:  python server.py      then open  http://localhost:8000
 """
 import io, os, json, wave
 import numpy as np
-import torch, torchaudio
 import onnxruntime as ort
 from flask import Flask, request, jsonify, send_from_directory
 from huggingface_hub import snapshot_download
+
+import indic_frontend as F
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 BLANK = 256
@@ -31,7 +34,6 @@ LANG_NAMES = {
 
 print("[server] loading model (one time) ...", flush=True)
 A = os.path.join(snapshot_download("ai4bharat/indic-conformer-600m-multilingual"), "assets")
-PREPROC = torch.jit.load(f"{A}/preprocessor.ts", map_location="cpu").eval()
 ENC = ort.InferenceSession(f"{A}/encoder.onnx", providers=["CPUExecutionProvider"])
 CTC = ort.InferenceSession(f"{A}/ctc_decoder.onnx", providers=["CPUExecutionProvider"])
 # per-language decode tables (encoder + ctc graph are shared across all languages)
@@ -51,17 +53,15 @@ def decode_wav_bytes(raw: bytes) -> np.ndarray:
     pcm = np.frombuffer(frames, dtype=np.int16).astype(np.float32) / 32768.0
     if ch > 1:
         pcm = pcm.reshape(-1, ch).mean(axis=1)
-    wav = torch.from_numpy(np.ascontiguousarray(pcm)).unsqueeze(0)
+    pcm = np.ascontiguousarray(pcm, dtype=np.float32)
     if sr != SR:
-        wav = torchaudio.functional.resample(wav, sr, SR)   # sinc, same as CP1/CP3
-    return wav.numpy()[0].astype(np.float32)
+        pcm = F.resample(pcm, sr, SR)     # numpy sinc port of torchaudio (verified 1e-8)
+    return pcm.astype(np.float32)
 
 
 def transcribe(samples: np.ndarray, lang: str) -> str:
     mask, vocab = MASKS[lang], VOCABS[lang]
-    wav = torch.from_numpy(samples).unsqueeze(0)
-    feat, length = PREPROC(input_signal=wav, length=torch.tensor([wav.shape[-1]]))
-    feat = feat.cpu().numpy(); length = length.cpu().numpy()
+    feat, length = F.mel_spectrogram(samples)   # numpy mel (verified vs preprocessor.ts, 1e-6)
     enc_out, _ = ENC.run(["outputs", "encoded_lengths"],
                          {"audio_signal": feat, "length": length})
     logprobs = CTC.run(["logprobs"], {"encoder_output": enc_out})[0]       # [1, T, 5633]

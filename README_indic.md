@@ -7,6 +7,10 @@ The model runs on **this computer as a server**; the browser is just a thin inte
 that uploads a `.wav` and displays the returned text. Verified reference: `test_nepali.wav`
 → **म सचै छु**.
 
+The runtime is **torch-free**: the model runs in `onnxruntime`, and the audio front-end
+(resample + mel) is pure **numpy** (`indic_frontend.py`). torch/torchaudio are used *only*
+as an offline oracle to verify the numpy code, never by the running server.
+
 ---
 
 ## Why server-side (and not in-browser)
@@ -42,9 +46,9 @@ English page. For a local/demo assignment this is fine.
    ┌─────────────────────────────────────────────────────────────┐
    │ 1. decode WAV      wave module → int16 → float32, downmix     │
    │                    to mono                                    │
-   │ 2. resample        torchaudio.functional.resample → 16 kHz    │
+   │ 2. resample        indic_frontend.resample (numpy sinc) →16kHz│
    │                    (SINC — linear resampling changes tokens!) │
-   │ 3. mel front-end   preprocessor.ts  (TorchScript)            │
+   │ 3. mel front-end   indic_frontend.mel_spectrogram (numpy)     │
    │                    → audio_signal [1, 80, T]                  │
    │ 4. encoder         encoder.onnx (onnxruntime)                 │
    │                    → outputs [1, 1024, T']                    │
@@ -60,9 +64,11 @@ English page. For a local/demo assignment this is fine.
                      browser shows the transcription
 ```
 
-### The mel front-end (step 3)
+### The mel front-end (step 3) — reimplemented torch-free
 
-Parameters extracted directly from `preprocessor.ts` (not assumed):
+`indic_frontend.mel_spectrogram()` reproduces `preprocessor.ts` in pure numpy, verified
+**bit-exact** against the TorchScript module (mean-abs diff ≈ 9e-7). Parameters (extracted
+directly from `preprocessor.ts`, not assumed):
 
 | param | value |
 |---|---|
@@ -71,11 +77,28 @@ Parameters extracted directly from `preprocessor.ts` (not assumed):
 | n_fft | 512 |
 | win_length | 400 (25 ms) |
 | hop_length | 160 (10 ms) |
-| window | Hann (periodic=False) |
+| window | Hann (periodic=False), zero-padded & centered in n_fft |
+| **preemphasis** | **0.97** (`y[i]=x[i]−0.97·x[i−1]`, before framing) |
 | padding | reflect, 256 each side (center) |
 | spectrogram | power (magnitude²) |
+| mel filterbank | slaney-normalized (librosa-equivalent), fmin=0, fmax=8000 |
 | log | `ln(mel + 2⁻²⁴)` |
-| normalization | per-feature: `(x − mean) / (std + 1e-5)` over time |
+| normalization | per-feature: `(x − mean) / (std + 1e-5)` over time (std ddof=1) |
+
+> ⚠️ **preemph = 0.97, not null.** An earlier `cp2` extraction recorded `preemph: null`
+> in `indic_preproc_config.json` — that was **wrong**. `preprocessor.ts` really applies
+> preemphasis 0.97; leaving it out gives a ~0.09 mel error (it happened to still decode
+> म सचै छु here, but would flip tokens on other clips). The value was pinned by sweeping
+> DSP variants against the TorchScript output. `preprocessor.ts` inlines its window +
+> filterbank as graph `prim::Constant` tensors (empty `state_dict`), so they were extracted
+> by walking `pp.graph` — and confirmed to match the numpy window/filterbank to ~1e-7.
+
+### Resampling (step 2) — reimplemented torch-free
+
+`indic_frontend.resample()` is an exact numpy port of `torchaudio.functional.resample`
+(`sinc_interp_hann`, `lowpass_filter_width=6`, `rolloff=0.99`) — a windowed-sinc kernel +
+strided convolution. It matches torchaudio to **≈ 9e-8**, so tokens are identical. A crude
+linear resample (`np.interp`) does **not** work — it changes tokens (see CP3 gotcha below).
 
 ### The ONNX part (steps 4–6) — the core
 
@@ -109,7 +132,9 @@ Switching language = switching mask + vocab; no model reload.
 
 ```
 Project files we wrote
-├── server.py                  # Flask server: loads model once, /transcribe + /languages
+├── server.py                  # Flask server (torch-free): loads model once, /transcribe + /languages
+├── indic_frontend.py          # torch-free numpy front-end: resample() + mel_spectrogram()
+├── verify_torchfree.py        # gate: proves numpy front-end == torch, still outputs म सचै छु
 ├── interface.html             # browser UI (upload, language picker, waveform, result)
 ├── README_indic.md            # this file
 │
@@ -125,7 +150,8 @@ Project files we wrote
 ├── indic_ctc_ne_columns.json  # the 257 CTC column indices selected for Nepali
 │
 ├── test_nepali.wav            # test clip → expected "म सचै छु"
-└── indic_env/                 # Python 3.12 venv (torch/torchaudio CPU, onnxruntime, flask)
+└── indic_env/                 # Python 3.12 venv (numpy + onnxruntime + flask at runtime;
+                               #   torch/torchaudio only for verify_torchfree.py)
 
 Model assets (downloaded from HuggingFace into ~/.cache/huggingface, not committed)
 ├── config.json                # BLANK_ID=256, RNNT params
@@ -160,14 +186,23 @@ step above it was verified against the PyTorch reference.
    `onnxruntime` reimplementation of the mask + SentencePiece decode. It reproduced
    **म सचै छु exactly**, proving both the ONNX graphs and the decode logic are correct.
    *Gotcha found here:* a crude linear (`np.interp`) resample produced a **wrong** token
-   (`म सन्चै छु`) — only the SINC resampler matches. Hence the server uses
-   `torchaudio.functional.resample`.
+   (`म सन्चै छु`) — only the SINC resampler matches. The server therefore uses a numpy port
+   of torchaudio's sinc resampler (`indic_frontend.resample`, see CP5).
 
 4. **Checkpoint 4 — ship it**
    The 2.2 GB fp32 model can't run in-browser, so the decision was **server-side**:
    `server.py` wraps the exact CP3 pipeline behind a Flask endpoint, and `interface.html`
    uploads audio and shows text. Then generalized from Nepali-only to **all 22 languages**
    by loading every mask/vocab and adding a `lang` parameter + language picker.
+
+5. **Checkpoint 5 — make it torch-free** (`indic_frontend.py`, `verify_torchfree.py`)
+   Replaced the only two torch dependencies with numpy: `torchaudio.functional.resample`
+   → a numpy sinc-kernel port, and `preprocessor.ts` (TorchScript mel) → a numpy
+   STFT+mel+log+norm. `verify_torchfree.py` gates the change — it uses torch *as an oracle*
+   to confirm resample matches to ≈9e-8, mel to ≈9e-7, and the full numpy pipeline still
+   outputs **म सचै छु** (with `torch` not even imported in the server process). This is where
+   the `preemph = 0.97` correction was found. The model still runs in `onnxruntime` on the
+   machine — torch-free does **not** make the 2.2 GB encoder browser-loadable.
 
 ---
 
@@ -184,12 +219,20 @@ python server.py            # loads the model once (~10–30 s), serves on :8000
 - **Audio format:** 16-bit PCM WAV (mono or stereo, any sample rate — resampled to 16 kHz).
 - **Note:** the model does **not** auto-detect language; select the one matching your audio.
 
+### Verifying the torch-free front-end
+
+```bash
+python verify_torchfree.py   # asserts numpy resample/mel == torch, output == म सचै छु
+```
+
 ## Setup notes
 
-- venv `indic_env` (Python 3.12): CPU builds of `torch==2.11.0` and `torchaudio==2.11.0+cpu`
-  (must both be CPU), plus `onnxruntime`, `flask`, `librosa`.
-- `torchaudio 2.11`'s `.load()` needs `torchcodec` (not installed) → WAV is decoded with the
-  stdlib `wave` module instead.
+- **Runtime deps:** `numpy`, `onnxruntime`, `flask` — that's all `server.py` imports. No torch.
+- **Verification-only deps:** `torch==2.11.0` / `torchaudio==2.11.0+cpu` (both must be CPU
+  builds) are needed *only* by `verify_torchfree.py` as the oracle, not to serve.
+- WAV is decoded with the stdlib `wave` module (16-bit PCM), so no audio-loading library is
+  required.
 - The model repo is **gated**: accept the terms on the model page and place a token at
   `~/.cache/huggingface/token`. The model itself needs **no NeMo toolkit** — it's
-  self-contained ONNX + TorchScript.
+  self-contained ONNX + TorchScript (and TorchScript is only the *reference*; the server
+  uses the numpy re-implementation).
