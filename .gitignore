@@ -4,3 +4,15 @@ example.wav
 indic_env/
 onnx_build/
 emsdk/
+# large / generated artifacts — keep out of git
+indic_asr_offline.zip
+indic_asr_portable.zip
+indic_asr_offline/
+indic_asr
+indic_mel
+lang/
+
+# benchmark audio + raw datasets (keep scripts/results json, drop heavy media)
+benchmarks/**/clips/
+benchmarks/**/raw/
+*.parquet

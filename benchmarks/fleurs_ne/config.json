@@ -1,0 +1,11 @@
+{
+ "hf_dataset": "google/fleurs",
+ "hf_config": "ne_np",
+ "split": "test",
+ "n": 100,
+ "lang": "ne",
+ "audio_field": "audio",
+ "ref_fields": ["transcription", "raw_transcription"],
+ "gated": false,
+ "note": "Google FLEURS Nepali test split. Clean read speech. No terms needed."
+}

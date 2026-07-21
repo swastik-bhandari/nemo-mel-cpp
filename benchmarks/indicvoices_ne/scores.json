@@ -1,0 +1,20 @@
+[
+ {
+  "label": "OURS (offline CTC)",
+  "n": 100,
+  "wer": 17.62,
+  "cer": 5.88
+ },
+ {
+  "label": "THEIRS (PyTorch CTC)",
+  "n": 100,
+  "wer": 17.62,
+  "cer": 5.88
+ },
+ {
+  "label": "THEIRS (PyTorch RNNT)",
+  "n": 100,
+  "wer": 15.97,
+  "cer": 5.57
+ }
+]

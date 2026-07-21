@@ -1,0 +1,28 @@
+[load] loading ai4bharat/indic-conformer-600m-multilingual ...
+Please check FRAME_DURATION_MS. The timestamps can be inaccurate
+Please check FRAME_DURATION_MS. The timestamps can be inaccurate
+Fetching 404 files:   0%|          | 0/404 [00:00<?, ?it/s]Fetching 404 files:  70%|███████   | 284/404 [00:00<00:00, 2768.30it/s]Fetching 404 files: 100%|██████████| 404/404 [00:00<00:00, 2826.27it/s]
+Please check FRAME_DURATION_MS. The timestamps can be inaccurate
+[load] ready in 7s
+  [ctc] 10/100 (5s)
+  [ctc] 20/100 (9s)
+  [ctc] 30/100 (12s)
+  [ctc] 40/100 (17s)
+  [ctc] 50/100 (20s)
+  [ctc] 60/100 (24s)
+  [ctc] 70/100 (27s)
+  [ctc] 80/100 (29s)
+  [ctc] 90/100 (31s)
+  [ctc] 100/100 (36s)
+[done ctc] 100 clips in 36s
+  [rnnt] 10/100 (6s)
+  [rnnt] 20/100 (12s)
+  [rnnt] 30/100 (18s)
+  [rnnt] 40/100 (24s)
+  [rnnt] 50/100 (28s)
+  [rnnt] 60/100 (35s)
+  [rnnt] 70/100 (40s)
+  [rnnt] 80/100 (43s)
+  [rnnt] 90/100 (46s)
+  [rnnt] 100/100 (52s)
+[done rnnt] 100 clips in 52s

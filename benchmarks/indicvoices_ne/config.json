@@ -1,0 +1,13 @@
+{
+ "hf_dataset": "ai4bharat/IndicVoices",
+ "hf_config": "nepali",
+ "split": "valid",
+ "n": 100,
+ "lang": "ne",
+ "audio_field": "audio_filepath",
+ "ref_fields": ["normalized", "text", "verbatim"],
+ "gated": true,
+ "sampling": "strided across the 2829 valid rows (stride 28) for speaker/scenario diversity",
+ "source": "parquet read directly (nepali/valid-00000-of-00001.parquet) — datasets streaming needs torchcodec; test split not public, valid used as held-out eval",
+ "note": "AI4Bharat IndicVoices — spontaneous/read speech, the model's own benchmark. Access granted for account Swastikk20067."
+}
